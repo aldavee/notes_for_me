@@ -12,23 +12,32 @@ class AppSnackBar {
           r'^(Exception|Error|PlatformException|ClientException|HttpException):\s*'),
       '',
     );
-    if (raw.toLowerCase().contains('sign_in_canceled') ||
-        raw.toLowerCase().contains('canceled by user') ||
+    final lower = raw.toLowerCase();
+    if (lower.contains('sign_in_canceled') ||
+        lower.contains('canceled by user') ||
+        lower.contains('googlesigninexceptioncode.canceled') ||
+        RegExp(r'(?:apiexception:\s*|\b)16:\s').hasMatch(lower) ||
         raw.contains('12501')) {
       return 'Sign-in was canceled.';
     }
-    if (raw.contains('403') || raw.toLowerCase().contains('forbidden')) {
+    if (lower.contains('clientconfigurationerror') ||
+        lower.contains('providerconfigurationerror') ||
+        lower.contains('developer_error') ||
+        RegExp(r'(?:apiexception:\s*|\b)10:\s').hasMatch(lower)) {
+      return 'Google Sign-In client config error (check OAuth SHA-1).';
+    }
+    if (raw.contains('403') || lower.contains('forbidden')) {
       return 'Access denied or Drive permissions required.';
     }
-    if (raw.contains('404') || raw.toLowerCase().contains('not found')) {
+    if (raw.contains('404') || lower.contains('not found')) {
       return 'Requested file or release was not found.';
     }
-    if (raw.toLowerCase().contains('socketexception') ||
-        raw.toLowerCase().contains('failed host lookup') ||
-        raw.toLowerCase().contains('connection refused')) {
+    if (lower.contains('socketexception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('connection refused')) {
       return 'Network error. Please check your internet connection.';
     }
-    if (raw.toLowerCase().contains('timeout')) {
+    if (lower.contains('timeout')) {
       return 'Request timed out. Please try again.';
     }
     if (raw.length > 90) {

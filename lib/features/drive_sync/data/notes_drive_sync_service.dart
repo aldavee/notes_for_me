@@ -8,6 +8,7 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:notes_for_me/core/config/auth_config.dart';
 import 'package:notes_for_me/features/drive_sync/data/desktop_oauth_client.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _BearerAuthClient extends http.BaseClient {
   _BearerAuthClient(this._token, [http.Client? inner])
@@ -34,23 +35,81 @@ class DriveAccountProfile {
 }
 
 class NotesDriveSyncService extends ChangeNotifier {
-  NotesDriveSyncService._();
+  NotesDriveSyncService._({
+    DesktopOAuthClient? desktopOAuth,
+    http.Client? httpClient,
+    Future<void> Function()? androidInitFn,
+    Future<GoogleSignInClientAuthorization?> Function(
+      List<String> scopes, {
+      required bool promptIfUnauthorized,
+    })? androidAuthorizeFn,
+    Future<void> Function(String? accessToken)? androidSignOutFn,
+  }) : this._internal(
+          desktopOAuth ?? DesktopOAuthClient(),
+          httpClient,
+          androidInitFn,
+          androidAuthorizeFn,
+          androidSignOutFn,
+        );
+
+  NotesDriveSyncService._internal(
+    this._desktopOAuth,
+    this._httpClient,
+    this._androidInitFn,
+    this._androidAuthorizeFn,
+    this._androidSignOutFn,
+  );
+
+  @visibleForTesting
+  factory NotesDriveSyncService.forTest({
+    DesktopOAuthClient? desktopOAuth,
+    http.Client? httpClient,
+    Future<void> Function()? androidInitFn,
+    Future<GoogleSignInClientAuthorization?> Function(
+      List<String> scopes, {
+      required bool promptIfUnauthorized,
+    })? androidAuthorizeFn,
+    Future<void> Function(String? accessToken)? androidSignOutFn,
+  }) =>
+      NotesDriveSyncService._(
+        desktopOAuth: desktopOAuth,
+        httpClient: httpClient,
+        androidInitFn: androidInitFn,
+        androidAuthorizeFn: androidAuthorizeFn,
+        androidSignOutFn: androidSignOutFn,
+      );
+
   static final NotesDriveSyncService instance = NotesDriveSyncService._();
 
-  static const List<String> _scopes = <String>[
+  static const List<String> _desktopScopes = <String>[
     drive.DriveApi.driveFileScope,
     drive.DriveApi.driveReadonlyScope,
     'email',
     'profile',
   ];
 
+  static const List<String> _androidScopes = <String>[
+    drive.DriveApi.driveFileScope,
+    drive.DriveApi.driveReadonlyScope,
+  ];
+
+  static const String _prefUserEmailKey = 'notes_for_me_drive_user_email_v1';
+  static const String _prefUserNameKey = 'notes_for_me_drive_user_name_v1';
+
   static const String backupFolderName = 'Notes For Me';
   static const String backupFileName = 'notes_for_me_backup.json';
 
-  final DesktopOAuthClient _desktopOAuth = DesktopOAuthClient();
-  GoogleSignInAccount? _androidUser;
+  final DesktopOAuthClient _desktopOAuth;
+  final http.Client? _httpClient;
+  final Future<void> Function()? _androidInitFn;
+  final Future<GoogleSignInClientAuthorization?> Function(
+    List<String> scopes, {
+    required bool promptIfUnauthorized,
+  })? _androidAuthorizeFn;
+  final Future<void> Function(String? accessToken)? _androidSignOutFn;
+  GoogleSignInClientAuthorization? _androidAuth;
   DriveAccountProfile? _profile;
-  bool _initialized = false;
+  Future<void>? _initFuture;
   DateTime? _lastSyncedAt;
 
   bool get _isDesktop =>
@@ -63,15 +122,15 @@ class NotesDriveSyncService extends ChangeNotifier {
   DriveAccountProfile? get profile => _profile;
   DateTime? get lastSyncedAt => _lastSyncedAt;
 
-  Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
+  Future<void> initialize() => _initFuture ??= _doInitialize();
+
+  Future<void> _doInitialize() async {
     if (_isDesktop) {
       await _desktopOAuth.loadSavedSession();
       try {
         final token = await _desktopOAuth.getValidAccessToken();
         if (token != null) {
-          await _fetchUserProfileFromToken(token);
+          await _resolveProfileFromToken(token);
         }
       } catch (_) {}
       notifyListeners();
@@ -80,18 +139,23 @@ class NotesDriveSyncService extends ChangeNotifier {
 
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
-        await GoogleSignIn.instance.initialize(
-          serverClientId: AuthConfig.serverClientId.isNotEmpty
-              ? AuthConfig.serverClientId
-              : null,
-        );
-        final account = await GoogleSignIn.instance
-            .attemptLightweightAuthentication();
-        if (account != null) {
-          _androidUser = account;
-          _profile = DriveAccountProfile(
-            email: account.email,
-            displayName: account.displayName ?? account.email,
+        if (_androidInitFn != null) {
+          await _androidInitFn();
+        } else {
+          await GoogleSignIn.instance.initialize(
+            serverClientId: AuthConfig.serverClientId.isNotEmpty
+                ? AuthConfig.serverClientId
+                : null,
+          );
+        }
+        // Use AuthorizationClient instead of CredentialManager authenticate() so
+        // Drive sign-in works with the Android OAuth client alone (no Web serverClientId needed).
+        final auth = await _authorizeAndroid(promptIfUnauthorized: false);
+        if (auth != null) {
+          _androidAuth = auth;
+          await _resolveProfileFromToken(
+            auth.accessToken,
+            driveApiClient: _buildAndroidDriveHttpClient(auth),
           );
           notifyListeners();
         }
@@ -102,23 +166,23 @@ class NotesDriveSyncService extends ChangeNotifier {
   Future<bool> signIn() async {
     await initialize();
     if (_isDesktop) {
-      final token = await _desktopOAuth.signInInteractive(scopes: _scopes);
-      await _fetchUserProfileFromToken(token);
+      final token =
+          await _desktopOAuth.signInInteractive(scopes: _desktopScopes);
+      await _resolveProfileFromToken(token);
       notifyListeners();
       return _profile != null;
     }
 
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      final account = await GoogleSignIn.instance.authenticate(
-        scopeHint: _scopes,
-      );
-      _androidUser = account;
-      _profile = DriveAccountProfile(
-        email: account.email,
-        displayName: account.displayName ?? account.email,
+      final auth = await _authorizeAndroid(promptIfUnauthorized: true);
+      if (auth == null) return false;
+      _androidAuth = auth;
+      await _resolveProfileFromToken(
+        auth.accessToken,
+        driveApiClient: _buildAndroidDriveHttpClient(auth),
       );
       notifyListeners();
-      return true;
+      return _profile != null;
     }
 
     throw UnsupportedError('Google Drive sign-in is not supported on this platform.');
@@ -128,37 +192,134 @@ class NotesDriveSyncService extends ChangeNotifier {
     if (_isDesktop) {
       await _desktopOAuth.clearSession();
     } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        await GoogleSignIn.instance.signOut();
-      } catch (_) {}
-      _androidUser = null;
+      final token = _androidAuth?.accessToken;
+      _androidAuth = null;
+      if (_androidSignOutFn != null) {
+        try {
+          await _androidSignOutFn(token);
+        } catch (_) {}
+      } else {
+        if (token != null && token.isNotEmpty) {
+          try {
+            await GoogleSignIn.instance.authorizationClient
+                .clearAuthorizationToken(accessToken: token);
+          } catch (_) {}
+        }
+        try {
+          await GoogleSignIn.instance.signOut();
+        } catch (_) {}
+      }
     }
     _profile = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefUserEmailKey);
+      await prefs.remove(_prefUserNameKey);
+    } catch (_) {}
     notifyListeners();
   }
 
-  Future<void> _fetchUserProfileFromToken(String token) async {
+  http.Client _buildAndroidDriveHttpClient(
+    GoogleSignInClientAuthorization auth,
+  ) {
+    if (_httpClient != null) {
+      return _BearerAuthClient(auth.accessToken, _httpClient);
+    }
+    return auth.authClient(scopes: _androidScopes);
+  }
+
+  Future<void> _resolveProfileFromToken(
+    String token, {
+    http.Client? driveApiClient,
+  }) async {
+    String email = '';
+    String name = '';
+
     try {
-      final resp = await http
-          .get(
-            Uri.parse('https://www.googleapis.com/oauth2/v2/userinfo'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(const Duration(seconds: 12));
-      if (resp.statusCode == 200) {
-        final json = jsonDecode(resp.body) as Map<String, dynamic>;
-        final email = (json['email'] ?? '').toString().trim();
-        final name = (json['name'] ?? email).toString().trim();
-        if (email.isNotEmpty) {
-          _profile = DriveAccountProfile(email: email, displayName: name);
+      final client = driveApiClient ?? _BearerAuthClient(token, _httpClient);
+      final about = await drive.DriveApi(client).about.get(
+        $fields: 'user(displayName,emailAddress)',
+      );
+      email = (about.user?.emailAddress ?? '').trim();
+      name = (about.user?.displayName ?? '').trim();
+    } catch (_) {}
+
+    if (email.isEmpty) {
+      try {
+        final client = _httpClient ?? http.Client();
+        try {
+          final resp = await client
+              .get(
+                Uri.parse('https://www.googleapis.com/oauth2/v2/userinfo'),
+                headers: {'Authorization': 'Bearer $token'},
+              )
+              .timeout(const Duration(seconds: 12));
+          if (resp.statusCode == 200) {
+            final json = jsonDecode(resp.body) as Map<String, dynamic>;
+            email = (json['email'] ?? '').toString().trim();
+            name = (json['name'] ?? email).toString().trim();
+          }
+        } finally {
+          if (_httpClient == null) client.close();
         }
+      } catch (_) {}
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (email.isNotEmpty) {
+        final resolvedName = name.isNotEmpty ? name : email;
+        await prefs.setString(_prefUserEmailKey, email);
+        await prefs.setString(_prefUserNameKey, resolvedName);
+        _profile = DriveAccountProfile(email: email, displayName: resolvedName);
+        return;
       }
-    } catch (_) {
-      _profile ??= const DriveAccountProfile(
-        email: 'Google Account',
-        displayName: 'Google Account',
+      final cachedEmail = prefs.getString(_prefUserEmailKey) ?? '';
+      final cachedName = prefs.getString(_prefUserNameKey) ?? '';
+      if (cachedEmail.isNotEmpty) {
+        _profile = DriveAccountProfile(
+          email: cachedEmail,
+          displayName: cachedName.isNotEmpty ? cachedName : cachedEmail,
+        );
+        return;
+      }
+    } catch (_) {}
+
+    _profile ??= const DriveAccountProfile(
+      email: 'Google Account',
+      displayName: 'Google Account',
+    );
+  }
+
+  Future<GoogleSignInClientAuthorization?> _authorizeAndroid({
+    required bool promptIfUnauthorized,
+  }) {
+    if (_androidAuthorizeFn != null) {
+      return _androidAuthorizeFn(
+        _androidScopes,
+        promptIfUnauthorized: promptIfUnauthorized,
       );
     }
+    if (promptIfUnauthorized) {
+      return GoogleSignIn.instance.authorizationClient
+          .authorizeScopes(_androidScopes);
+    }
+    return GoogleSignIn.instance.authorizationClient
+        .authorizationForScopes(_androidScopes);
+  }
+
+  Future<GoogleSignInClientAuthorization?> _getAndroidAuth({
+    bool promptIfUnauthorized = false,
+  }) async {
+    var auth = await _authorizeAndroid(promptIfUnauthorized: false);
+    auth ??= _androidAuth;
+    if (auth == null && promptIfUnauthorized) {
+      auth = await _authorizeAndroid(promptIfUnauthorized: true);
+    }
+    if (auth != null) {
+      _androidAuth = auth;
+    }
+    return auth;
   }
 
   Future<Map<String, String>?> getAuthHeaders() async {
@@ -167,25 +328,28 @@ class NotesDriveSyncService extends ChangeNotifier {
       if (token == null) return null;
       return {'Authorization': 'Bearer $token'};
     }
-    final user = _androidUser;
-    if (user == null) return null;
-    final auth = await user.authorizationClient.authorizationForScopes(_scopes);
-    final token = auth?.accessToken;
-    if (token == null || token.isEmpty) return null;
-    return {'Authorization': 'Bearer $token'};
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      final auth = await _getAndroidAuth();
+      final token = auth?.accessToken;
+      if (token == null || token.isEmpty) return null;
+      return {'Authorization': 'Bearer $token'};
+    }
+    return null;
   }
 
   Future<drive.DriveApi?> _getDriveApi() async {
     if (_isDesktop) {
       final token = await _desktopOAuth.getValidAccessToken();
       if (token == null) return null;
-      return drive.DriveApi(_BearerAuthClient(token));
+      return drive.DriveApi(_BearerAuthClient(token, _httpClient));
     }
-    final user = _androidUser;
-    if (user == null) return null;
-    var auth = await user.authorizationClient.authorizationForScopes(_scopes);
-    auth ??= await user.authorizationClient.authorizeScopes(_scopes);
-    return drive.DriveApi(auth.authClient(scopes: _scopes));
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      if (_profile == null && _androidAuth == null) return null;
+      final auth = await _getAndroidAuth(promptIfUnauthorized: true);
+      if (auth == null) return null;
+      return drive.DriveApi(_buildAndroidDriveHttpClient(auth));
+    }
+    return null;
   }
 
   Future<String> _ensureBackupFolderId(drive.DriveApi api) async {
