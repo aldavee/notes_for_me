@@ -405,9 +405,12 @@ jobs:
         shell: pwsh
         env:
           GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY || vars.GDRIVE_API_KEY || '' }}
-          GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_CLIENT_ID || vars.GOOGLE_DESKTOP_CLIENT_ID || '' }}
+          GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_CLIENT_ID || vars.GOOGLE_DESKTOP_CLIENT_ID || '702325277685-1dg53pr10l0n8tc2ftug9agqfv840h9h.apps.googleusercontent.com' }}
           GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_CLIENT_SECRET || '' }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:GOOGLE_DESKTOP_CLIENT_SECRET)) {
+            Write-Host "::warning::GOOGLE_DESKTOP_CLIENT_SECRET is not set in GitHub production secrets; Google OAuth token exchange on Desktop requires this secret."
+          }
           flutter build windows --release `
             --build-name="${{ needs.prepare-release.outputs.build_name }}" `
             --build-number="${{ needs.prepare-release.outputs.build_number }}" `

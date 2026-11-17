@@ -7,6 +7,9 @@ class AuthConfig {
   static const String authUri = 'https://accounts.google.com/o/oauth2/auth';
   static const String tokenUri = 'https://oauth2.googleapis.com/token';
 
+  static const String defaultDesktopClientId =
+      '702325277685-1dg53pr10l0n8tc2ftug9agqfv840h9h.apps.googleusercontent.com';
+
   static const String serverClientId = String.fromEnvironment(
     'GOOGLE_SERVER_CLIENT_ID',
     defaultValue: '',
@@ -14,7 +17,7 @@ class AuthConfig {
 
   static const String desktopClientId = String.fromEnvironment(
     'GOOGLE_DESKTOP_CLIENT_ID',
-    defaultValue: '',
+    defaultValue: defaultDesktopClientId,
   );
 
   static const String desktopClientSecret = String.fromEnvironment(
@@ -23,5 +26,7 @@ class AuthConfig {
   );
 
   static String get effectiveDesktopClientId =>
-      desktopClientId.trim().isNotEmpty ? desktopClientId.trim() : clientId;
+      desktopClientId.trim().isNotEmpty
+          ? desktopClientId.trim()
+          : defaultDesktopClientId;
 }

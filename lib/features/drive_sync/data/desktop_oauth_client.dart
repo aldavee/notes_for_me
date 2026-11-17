@@ -113,6 +113,19 @@ class DesktopOAuthClient {
     return List.generate(length, (_) => chars[rand.nextInt(chars.length)]).join();
   }
 
+  String _extractOAuthError(http.Response resp) {
+    try {
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map) {
+        final desc = decoded['error_description']?.toString().trim();
+        final err = decoded['error']?.toString().trim();
+        if (desc != null && desc.isNotEmpty) return desc;
+        if (err != null && err.isNotEmpty) return err;
+      }
+    } catch (_) {}
+    return resp.body.trim();
+  }
+
   Future<String> signInInteractive({required List<String> scopes}) async {
     final codeVerifier = _randomUrlSafe(64);
     final codeChallenge = base64UrlEncode(
@@ -142,6 +155,11 @@ class DesktopOAuthClient {
 
       String? authCode;
       await for (final request in server.timeout(const Duration(minutes: 3))) {
+        if (request.uri.path == '/favicon.ico') {
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+          continue;
+        }
         final params = request.uri.queryParameters;
         if (params['state'] != state) {
           request.response
@@ -199,7 +217,12 @@ class DesktopOAuthClient {
           .timeout(const Duration(seconds: 25));
 
       if (tokenResp.statusCode != 200) {
-        throw Exception('Token exchange failed (${tokenResp.statusCode}).');
+        final detail = _extractOAuthError(tokenResp);
+        throw Exception(
+          detail.isNotEmpty
+              ? 'Token exchange failed (${tokenResp.statusCode}): $detail'
+              : 'Token exchange failed (${tokenResp.statusCode}).',
+        );
       }
       final json = jsonDecode(tokenResp.body) as Map<String, dynamic>;
       final accessToken = (json['access_token'] ?? '').toString().trim();
@@ -256,8 +279,15 @@ class DesktopOAuthClient {
         )
         .timeout(const Duration(seconds: 20));
     if (resp.statusCode != 200) {
-      await clearSession();
-      throw Exception('Failed to refresh Google OAuth token.');
+      if (resp.statusCode == 400 || resp.statusCode == 401) {
+        await clearSession();
+      }
+      final detail = _extractOAuthError(resp);
+      throw Exception(
+        detail.isNotEmpty
+            ? 'Failed to refresh Google OAuth token (${resp.statusCode}): $detail'
+            : 'Failed to refresh Google OAuth token (${resp.statusCode}).',
+      );
     }
     final json = jsonDecode(resp.body) as Map<String, dynamic>;
     final accessToken = (json['access_token'] ?? '').toString().trim();

@@ -22,4 +22,5 @@ Same Google Drive & Android signing pattern as `pocket_shelf`:
 
 - `GDRIVE_REFRESH_TOKEN`, `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET` (or `GDRIVE_SERVICE_ACCOUNT_JSON`)
 - `GDRIVE_RELEASE_FOLDER_ID`, `GDRIVE_MANIFEST_FILE_ID`, `GDRIVE_API_KEY`, `GDRIVE_PUBLIC_RELEASES`
+- `GOOGLE_DESKTOP_CLIENT_ID` (defaults to `702325277685-1dg53pr10l0n8tc2ftug9agqfv840h9h.apps.googleusercontent.com` in workflow & `AuthConfig`), `GOOGLE_DESKTOP_CLIENT_SECRET` (required for Desktop Google Drive OAuth token exchange)
 - `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`

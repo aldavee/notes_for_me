@@ -68,10 +68,12 @@ class NotesDriveSyncService extends ChangeNotifier {
     _initialized = true;
     if (_isDesktop) {
       await _desktopOAuth.loadSavedSession();
-      final token = await _desktopOAuth.getValidAccessToken();
-      if (token != null) {
-        await _fetchUserProfileFromToken(token);
-      }
+      try {
+        final token = await _desktopOAuth.getValidAccessToken();
+        if (token != null) {
+          await _fetchUserProfileFromToken(token);
+        }
+      } catch (_) {}
       notifyListeners();
       return;
     }
