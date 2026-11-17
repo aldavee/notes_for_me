@@ -52,6 +52,48 @@ jobs:
             docker image prune -af >/dev/null 2>&1 || true
           fi
 
+      - name: Pre-flight Validate Android Signing Credentials
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          set_count=0
+          for var in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [[ -n "${!var:-}" ]] && set_count=$((set_count + 1))
+          done
+          if (( set_count == 0 )); then
+            echo "::warning::No Android release signing secrets configured; build will use debug signing fallback."
+            exit 0
+          fi
+          if (( set_count < 4 )); then
+            echo "::error::Incomplete Android signing secrets ($set_count/4 set). Configure all 4: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD."
+            exit 1
+          fi
+          tmp_dir="$RUNNER_TEMP/preflight-signing"
+          mkdir -p "$tmp_dir"
+          ks="$tmp_dir/release-keystore.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ks"
+          keytool -list -v -keystore "$ks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" > /dev/null
+          cat << 'EOF' > "$tmp_dir/VerifyKey.java"
+          import java.io.File;
+          import java.security.Key;
+          import java.security.KeyStore;
+          public class VerifyKey {
+            public static void main(String[] args) throws Exception {
+              KeyStore ks = KeyStore.getInstance(new File(args[0]), args[1].toCharArray());
+              Key k = ks.getKey(args[2], args[3].toCharArray());
+              if (k == null) throw new RuntimeException("Alias not found: " + args[2]);
+            }
+          }
+          EOF
+          java "$tmp_dir/VerifyKey.java" "$ks" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"
+          rm -rf "$tmp_dir"
+          echo "Android signing keystore and private key credentials verified."
+
       - name: Prepare Google Drive Release Target
         id: gdrive_prepare
         shell: bash
