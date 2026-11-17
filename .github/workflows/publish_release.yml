@@ -78,18 +78,17 @@ jobs:
           ks="$tmp_dir/release-keystore.jks"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ks"
           keytool -list -v -keystore "$ks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" > /dev/null
-          cat << 'EOF' > "$tmp_dir/VerifyKey.java"
-          import java.io.File;
-          import java.security.Key;
-          import java.security.KeyStore;
-          public class VerifyKey {
-            public static void main(String[] args) throws Exception {
-              KeyStore ks = KeyStore.getInstance(new File(args[0]), args[1].toCharArray());
-              Key k = ks.getKey(args[2], args[3].toCharArray());
-              if (k == null) throw new RuntimeException("Alias not found: " + args[2]);
-            }
-          }
-          EOF
+          printf '%s\n' \
+            'import java.io.File;' \
+            'import java.security.Key;' \
+            'import java.security.KeyStore;' \
+            'public class VerifyKey {' \
+            '  public static void main(String[] args) throws Exception {' \
+            '    KeyStore ks = KeyStore.getInstance(new File(args[0]), args[1].toCharArray());' \
+            '    Key k = ks.getKey(args[2], args[3].toCharArray());' \
+            '    if (k == null) throw new RuntimeException("Alias not found: " + args[2]);' \
+            '  }' \
+            '}' > "$tmp_dir/VerifyKey.java"
           java "$tmp_dir/VerifyKey.java" "$ks" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"
           rm -rf "$tmp_dir"
           echo "Android signing keystore and private key credentials verified."
@@ -258,19 +257,17 @@ jobs:
               -keystore "$keystore_path" \
               -storepass "$ANDROID_KEYSTORE_PASSWORD" \
               -alias "$ANDROID_KEY_ALIAS" > /dev/null
-            cat << 'EOF' > "$signing_dir/VerifyKey.java"
-import java.io.File;
-import java.security.Key;
-import java.security.KeyStore;
-
-public class VerifyKey {
-  public static void main(String[] args) throws Exception {
-    KeyStore ks = KeyStore.getInstance(new File(args[0]), args[1].toCharArray());
-    Key k = ks.getKey(args[2], args[3].toCharArray());
-    if (k == null) throw new RuntimeException("Alias not found: " + args[2]);
-  }
-}
-EOF
+            printf '%s\n' \
+              'import java.io.File;' \
+              'import java.security.Key;' \
+              'import java.security.KeyStore;' \
+              'public class VerifyKey {' \
+              '  public static void main(String[] args) throws Exception {' \
+              '    KeyStore ks = KeyStore.getInstance(new File(args[0]), args[1].toCharArray());' \
+              '    Key k = ks.getKey(args[2], args[3].toCharArray());' \
+              '    if (k == null) throw new RuntimeException("Alias not found: " + args[2]);' \
+              '  }' \
+              '}' > "$signing_dir/VerifyKey.java"
             java "$signing_dir/VerifyKey.java" "$keystore_path" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"
             echo "ANDROID_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
             echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
