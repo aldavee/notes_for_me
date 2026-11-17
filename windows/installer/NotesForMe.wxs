@@ -1,0 +1,79 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Notes For Me"
+      Manufacturer="AldaveLabs"
+      Version="$(var.MsiVersion)"
+      UpgradeCode="C4D9E2A7-81B3-4F6E-9A52-7B3C1D8E4F20"
+      Scope="perMachine"
+      InstallerVersion="500">
+
+    <SummaryInformation
+        Description="Notes For Me - Offline-First Personal Notes, Checklists &amp; Google Drive Sync" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+        Schedule="afterInstallInitialize" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://notes.aldavelabs.com" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Notes For Me" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Notes For Me" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.SourceDir)\**" />
+    </ComponentGroup>
+
+    <ComponentGroup Id="Shortcuts">
+      <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
+        <Shortcut
+            Id="ApplicationStartMenuShortcut"
+            Name="Notes For Me"
+            Description="Notes For Me Desktop Workspace"
+            Target="[INSTALLFOLDER]notes_for_me.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="AppIcon.ico" />
+        <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\AldaveLabs\NotesForMe"
+            Name="StartMenuShortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+
+      <Component Id="DesktopShortcutComponent" Directory="DesktopFolder" Guid="*">
+        <Shortcut
+            Id="DesktopShortcut"
+            Name="Notes For Me"
+            Description="Notes For Me Desktop Workspace"
+            Target="[INSTALLFOLDER]notes_for_me.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="AppIcon.ico" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\AldaveLabs\NotesForMe"
+            Name="DesktopShortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="ProductFeature" Title="Notes For Me" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentGroupRef Id="Shortcuts" />
+    </Feature>
+  </Package>
+</Wix>
