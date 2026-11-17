@@ -369,7 +369,9 @@ jobs:
       - name: Install WiX Toolset for Windows MSI Installer
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
+          if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
+            dotnet tool install --global wix --version 5.*
+          }
           wix --version
 
       - name: Validate & Package Windows Release Bundle (MSI Installer + Portable ZIP)
@@ -380,6 +382,11 @@ jobs:
           $exePath = Join-Path $releaseDir "notes_for_me.exe"
           if (-not (Test-Path $exePath)) {
             Write-Error "Required Windows executable $exePath was not produced!"
+            exit 1
+          }
+          $exeSize = (Get-Item $exePath).Length
+          if ($exeSize -lt 10000) {
+            Write-Error "Windows executable $exePath is suspiciously small ($exeSize bytes)!"
             exit 1
           }
           New-Item -ItemType Directory -Force -Path "release-staging\windows" | Out-Null
@@ -400,6 +407,10 @@ jobs:
             -d "MsiVersion=$msiVersion" `
             -arch x64 `
             -o $msiPath
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $msiPath) -or (Get-Item $msiPath).Length -lt 100000) {
+            Write-Error "Failed to produce valid MSI installer at $msiPath"
+            exit 1
+          }
 
           $zipName = "notes-for-me-${{ needs.prepare-release.outputs.version }}-windows-x64.zip"
           $zipPath = Join-Path "release-staging\windows" $zipName
