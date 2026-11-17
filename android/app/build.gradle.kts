@@ -1,3 +1,4 @@
+import java.io.File
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -13,8 +14,18 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
-val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
-    ?: keystoreProperties.getProperty("storeFile")?.let { rootProject.file(it).absolutePath }
+val rawKeystoreEnvPath = System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+val releaseKeystorePath = rawKeystoreEnvPath?.let { raw ->
+    val direct = file(raw)
+    val fromRoot = rootProject.file(raw)
+    val fromRepo = rootProject.projectDir.parentFile?.let { File(it, raw) }
+    when {
+        direct.exists() -> direct.absolutePath
+        fromRoot.exists() -> fromRoot.absolutePath
+        fromRepo != null && fromRepo.exists() -> fromRepo.absolutePath
+        else -> raw
+    }
+} ?: keystoreProperties.getProperty("storeFile")?.let { rootProject.file(it).absolutePath }
 val releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
     ?: keystoreProperties.getProperty("storePassword")
 val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
